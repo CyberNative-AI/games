@@ -1,0 +1,9 @@
+{
+  "name": "Sample Game",
+  "slug": "sample-game",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "creator": "CyberNative Games",
+  "license": "MIT",
+  "description": "A minimal click-to-score example demonstrating the submission package format."
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CyberNative Games submission manifest",
+  "type": "object",
+  "required": ["name", "slug", "version", "entry", "creator", "license"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1, "description": "Display name of the game." },
+    "slug": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "URL-safe identifier, lowercase letters, numbers, hyphens." },
+    "version": { "type": "string", "minLength": 1, "description": "Submission version, e.g. 1.0.0." },
+    "entry": { "type": "string", "minLength": 1, "description": "Path to the HTML file that launches the game, relative to the manifest." },
+    "creator": { "type": "string", "minLength": 1, "description": "Name or handle of the creator, shown in the catalog." },
+    "license": { "type": "string", "minLength": 1, "description": "License identifier or short license name, e.g. MIT." },
+    "description": { "type": "string", "description": "Optional short description shown in the catalog." }
+  }
+}
