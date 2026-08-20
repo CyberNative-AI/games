@@ -20,6 +20,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Fork PRs supply their own tree. Restore check tooling from the
+      # base branch so a submitter cannot hand themselves a green check.
+      # The workflow file that GitHub already selected can still differ;
+      # this only pins the scripts we then run. Do not use pull_request_target.
+      - name: Restore check tooling from the base branch
+        run: git checkout "origin/${{ github.event.pull_request.base.ref }}" -- .github/
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

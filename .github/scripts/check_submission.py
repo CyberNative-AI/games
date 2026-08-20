@@ -27,27 +27,58 @@ INLINE_SCRIPT_TAG = re.compile(r"<script(?![^>]*\bsrc\s*=)[^>]*>\s*[^<\s]", re.I
 EVENT_HANDLER_ATTR = re.compile(r"""\son[a-z]+\s*=\s*["']""", re.IGNORECASE)
 
 
-def find_changed_submission_dirs(base_ref):
-    """Return submission dirs touched by this PR, or all of them if that fails."""
+def _git_changed_paths(base_ref):
+    """Return paths changed on HEAD relative to base_ref, or None on failure."""
     try:
         out = subprocess.run(
             ["git", "diff", "--name-only", f"{base_ref}...HEAD"],
             capture_output=True, text=True, check=True, cwd=os.getcwd(),
         ).stdout
+    except Exception:
+        return None
+    return [line for line in out.splitlines() if line]
+
+
+def find_changed_submission_dirs(base_ref):
+    """Return submission dirs touched by this PR, or all of them if that fails."""
+    paths = _git_changed_paths(base_ref)
+    if paths is not None:
         dirs = set()
-        for line in out.splitlines():
+        for line in paths:
             if line.startswith("submissions/"):
                 parts = line.split("/")
                 if len(parts) >= 2:
                     dirs.add(os.path.join("submissions", parts[1]))
         if dirs:
             return sorted(dirs)
-    except Exception:
-        pass
     return sorted(
         os.path.join("submissions", d)
         for d in os.listdir("submissions")
         if os.path.isdir(os.path.join("submissions", d))
+    )
+
+
+def find_out_of_scope_paths(base_ref):
+    """Changed paths that are not under submissions/. Empty if git is unavailable."""
+    paths = _git_changed_paths(base_ref)
+    if not paths:
+        return []
+    return [
+        p for p in paths
+        if p != "submissions" and not p.startswith("submissions/")
+    ]
+
+
+def advisory_out_of_scope_note(base_ref):
+    """Advisory text only — never changes pass/fail."""
+    paths = find_out_of_scope_paths(base_ref)
+    if not paths:
+        return None
+    listed = ", ".join(f"`{p}`" for p in paths)
+    return (
+        f"This PR changes files outside `submissions/`: {listed}. "
+        "A submission PR should only add files under `submissions/<your-folder>/`. "
+        "A reviewer will treat other changes as out of scope."
     )
 
 
@@ -186,12 +217,27 @@ def emit_report_and_exit(report, exit_code):
     sys.exit(exit_code)
 
 
+def _heading_with_advisory(base_ref, fallback_body=None):
+    """Build the report heading, inserting the out-of-scope note above the rules."""
+    note = advisory_out_of_scope_note(base_ref)
+    if fallback_body is not None:
+        parts = ["## Submission check results", ""]
+        if note:
+            parts.extend([note, ""])
+        parts.append(fallback_body)
+        return "\n".join(parts)
+    lines = ["## Submission check results\n"]
+    if note:
+        lines.append(note + "\n")
+    return lines
+
+
 def main():
     base_ref = os.environ.get("BASE_REF", "origin/main")
     submissions_root = "submissions"
     if not os.path.isdir(submissions_root):
         emit_report_and_exit(
-            "## Submission check results\n\nNo submissions/ directory found.",
+            _heading_with_advisory(base_ref, "No submissions/ directory found."),
             0,
         )
 
@@ -199,12 +245,12 @@ def main():
     sub_dirs = [d for d in sub_dirs if os.path.isdir(d)]
     if not sub_dirs:
         emit_report_and_exit(
-            "## Submission check results\n\nNo submission folders found to check.",
+            _heading_with_advisory(base_ref, "No submission folders found to check."),
             0,
         )
 
     all_passed = True
-    report_lines = ["## Submission check results\n"]
+    report_lines = _heading_with_advisory(base_ref)
 
     for sub_dir in sub_dirs:
         report_lines.append(f"### `{sub_dir}`\n")
