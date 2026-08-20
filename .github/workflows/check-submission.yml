@@ -37,6 +37,7 @@ jobs:
           exit 0
 
       - name: Stage report artifact
+        if: always()
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -46,21 +47,35 @@ jobs:
           ARTIFACT_DIR: ${{ runner.temp }}/submission-report
         run: |
           mkdir -p "$ARTIFACT_DIR"
-          cp "$REPORT_MD" "$ARTIFACT_DIR/report.md"
+          if [ -f "$REPORT_MD" ]; then
+            cp "$REPORT_MD" "$ARTIFACT_DIR/report.md"
+            REPORT_OK=true
+          else
+            printf '%s\n' 'The submission checker did not finish. A maintainer has been notified.' > "$ARTIFACT_DIR/report.md"
+            REPORT_OK=false
+          fi
+          export REPORT_OK
           python3 - <<'PY'
           import json, os, pathlib
           artifact = pathlib.Path(os.environ["ARTIFACT_DIR"])
+          raw = (os.environ.get("EXIT_CODE") or "").strip()
+          try:
+              check_exit_code = int(raw)
+          except ValueError:
+              check_exit_code = 1
           meta = {
               "pr_number": int(os.environ["PR_NUMBER"]),
               "head_sha": os.environ["HEAD_SHA"],
               "head_repo": os.environ["HEAD_REPO"],
-              "check_exit_code": int(os.environ["EXIT_CODE"]),
+              "check_exit_code": check_exit_code,
               "run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "report_ok": os.environ.get("REPORT_OK") == "true",
           }
           (artifact / "meta.json").write_text(json.dumps(meta) + "\n", encoding="utf-8")
           PY
 
       - name: Upload report artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: submission-report

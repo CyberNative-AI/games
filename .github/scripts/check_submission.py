@@ -171,25 +171,52 @@ def run_checks(sub_dir):
     return results
 
 
+def emit_report_and_exit(report, exit_code):
+    """Write the report to stdout, the step summary, and REPORT_OUTPUT_PATH, then exit."""
+    print(report)
+
+    with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as f:
+        f.write(report + "\n")
+
+    out_path = os.environ.get("REPORT_OUTPUT_PATH")
+    if out_path:
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(report)
+
+    sys.exit(exit_code)
+
+
 def main():
     base_ref = os.environ.get("BASE_REF", "origin/main")
     submissions_root = "submissions"
     if not os.path.isdir(submissions_root):
-        print("No submissions/ directory found.")
-        sys.exit(1)
+        emit_report_and_exit(
+            "## Submission check results\n\nNo submissions/ directory found.",
+            0,
+        )
 
     sub_dirs = find_changed_submission_dirs(base_ref)
     sub_dirs = [d for d in sub_dirs if os.path.isdir(d)]
     if not sub_dirs:
-        print("No submission folders found to check.")
-        sys.exit(1)
+        emit_report_and_exit(
+            "## Submission check results\n\nNo submission folders found to check.",
+            0,
+        )
 
     all_passed = True
     report_lines = ["## Submission check results\n"]
 
     for sub_dir in sub_dirs:
         report_lines.append(f"### `{sub_dir}`\n")
-        results = run_checks(sub_dir)
+        try:
+            results = run_checks(sub_dir)
+        except Exception as exc:
+            all_passed = False
+            report_lines.append(
+                f"- ❌ **Checker error** — Unexpected {type(exc).__name__} while checking `{sub_dir}`."
+            )
+            report_lines.append("")
+            continue
         for name, ok, msg in results:
             icon = "✅" if ok else "❌"
             report_lines.append(f"- {icon} **{name}** — {msg}")
@@ -202,18 +229,7 @@ def main():
     else:
         report_lines.append("One or more checks failed. Fix the issues above and push again — checks re-run automatically.")
 
-    report = "\n".join(report_lines)
-    print(report)
-
-    with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as f:
-        f.write(report + "\n")
-
-    out_path = os.environ.get("REPORT_OUTPUT_PATH")
-    if out_path:
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(report)
-
-    sys.exit(0 if all_passed else 1)
+    emit_report_and_exit("\n".join(report_lines), 0 if all_passed else 1)
 
 
 if __name__ == "__main__":

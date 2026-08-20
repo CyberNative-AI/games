@@ -17,6 +17,8 @@ jobs:
     if: github.event.workflow_run.event == 'pull_request' && contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion)
     steps:
       - name: Download report artifact
+        id: download
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: submission-report
@@ -25,6 +27,7 @@ jobs:
           path: ${{ runner.temp }}/submission-report
 
       - name: Post PR comment
+        if: always()
         uses: actions/github-script@v7
         env:
           REPORT_DIR: ${{ runner.temp }}/submission-report
@@ -34,13 +37,17 @@ jobs:
             const path = require('path');
             const dir = process.env.REPORT_DIR;
             const wr = context.payload.workflow_run;
-            const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
-            let body = fs.readFileSync(path.join(dir, 'report.md'), 'utf8');
-            if (typeof body !== 'string') {
-              throw new Error('report.md is not text');
-            }
-            if (meta.head_sha !== wr.head_sha) {
-              throw new Error(`artifact head_sha ${meta.head_sha} does not match workflow_run ${wr.head_sha}`);
+            const metaPath = path.join(dir, 'meta.json');
+            const reportPath = path.join(dir, 'report.md');
+            const hasMeta = fs.existsSync(metaPath);
+            const hasReport = fs.existsSync(reportPath);
+
+            let meta = null;
+            if (hasMeta) {
+              meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+              if (meta.head_sha !== wr.head_sha) {
+                throw new Error(`artifact head_sha ${meta.head_sha} does not match workflow_run ${wr.head_sha}`);
+              }
             }
 
             async function resolvePrNumber() {
@@ -62,7 +69,7 @@ jobs:
                   return match.number;
                 }
               }
-              const n = Number(meta.pr_number);
+              const n = Number(meta && meta.pr_number);
               if (!Number.isInteger(n) || n <= 0) {
                 throw new Error('could not resolve PR number');
               }
@@ -78,6 +85,15 @@ jobs:
             }
 
             const prNumber = await resolvePrNumber();
+            let body;
+            if (hasReport) {
+              body = fs.readFileSync(reportPath, 'utf8');
+              if (typeof body !== 'string') {
+                throw new Error('report.md is not text');
+              }
+            } else {
+              body = 'The submission checker did not produce a report. A maintainer will look.';
+            }
             if (body.length > 60000) {
               body = body.slice(0, 60000) + '\n\n_(report truncated)_';
             }
