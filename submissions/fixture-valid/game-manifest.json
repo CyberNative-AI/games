@@ -1,0 +1,9 @@
+{
+  "name": "Fixture Valid",
+  "slug": "fixture-valid",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "creator": "CyberNative Games",
+  "license": "MIT",
+  "description": "Valid layout copied from sample-game for the fork-path comment check."
+}
