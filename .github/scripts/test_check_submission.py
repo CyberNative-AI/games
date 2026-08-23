@@ -382,6 +382,18 @@ class RemoteLoadsThroughStrings(SubmissionCase):
                 results = self.build({"index.html": PLAIN_HTML, "game.js": js})
                 self.assertRuleFails(results, ORIGINS_RULE)
 
+    def test_scheme_only_prefix_string_fails(self):
+        # The URL is assembled at runtime, but the literal still carries the
+        # scheme, so the load is as remote as a whole URL would be.
+        results = self.build({
+            "index.html": PLAIN_HTML,
+            "game.js": (
+                'const base = "https://";\n'
+                'new Image().src = base + "cdn.example.com/x.png";\n'
+            ),
+        })
+        self.assertRuleFails(results, ORIGINS_RULE)
+
     def test_srcset_and_poster_attributes_fail(self):
         for tag in (
             '<img srcset="https://cdn.example.com/a.png 2x" alt="a">',
