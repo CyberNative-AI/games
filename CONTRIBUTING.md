@@ -56,6 +56,8 @@ Keep your submission folder — all HTML, CSS, JS, and assets combined — at or
 ### No external origins or network calls
 Your shipped files can't reach outside the repo: no `fetch(...)`, `XMLHttpRequest`, `WebSocket`, `EventSource`, or tags like `<script src="https://...">` / `<img src="https://...">` pointing at an external URL. Bundle everything your game needs — fonts, libraries, art, audio — inside your submission folder. This keeps games playable offline and reviewable from static files alone.
 
+An absolute URL written anywhere the browser runs code — a `.js`, `.mjs` or `.css` file, or a `<style>` or inline `<script>` body — fails this check even when it isn't sitting next to `src=`, because the load happens all the same: `new Audio("https://…")`, `import(CDN)`, `img.src = url`. Use a relative path (`./assets/theme.mp3`) and ship the file. Two places are exempt, because neither loads anything: comments, and data blocks such as `<script type="application/ld+json">`.
+
 ### No inline scripts
 No `<script>...your code...</script>` blocks and no `on*="..."` event-handler attributes (`onclick`, `onload`, etc.) in your HTML. Put your JavaScript in `.js` files and load them with `<script src="your-file.js"></script>`. This is also exactly what the production site's content-security policy allows — code that passes this check will actually run when it ships.
 
