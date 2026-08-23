@@ -325,6 +325,137 @@ class DefectThreeHiddenInlineScripts(SubmissionCase):
         self.assertRuleFails(results, INLINE_RULE)
 
 
+class RemoteLoadsThroughStrings(SubmissionCase):
+    """A remote load hidden in a string literal is still a remote load.
+
+    The load-syntax patterns only see a URL sitting directly after `src=` or
+    inside `url(`, so anything that routes the URL through a variable or a
+    constructor argument used to ship green and then break under the
+    production CSP. These four are the fixtures from the report.
+    """
+
+    def test_string_origin_assigned_to_src_fails(self):
+        results = self.build({
+            "index.html": PLAIN_HTML,
+            "game.js": (
+                'const u = "https://cdn.example.com/tracker.js";\n'
+                "new Image().src = u;\n"
+            ),
+        })
+        self.assertRuleFails(results, ORIGINS_RULE)
+
+    def test_dynamic_import_of_a_string_constant_fails(self):
+        results = self.build({
+            "index.html": PLAIN_HTML,
+            "game.js": (
+                'const CDN = "https://cdn.jsdelivr.net/npm/pkg/x.mjs";\n'
+                "import(CDN).then(m => m.init());\n"
+            ),
+        })
+        self.assertRuleFails(results, ORIGINS_RULE)
+
+    def test_remote_audio_constructor_fails(self):
+        results = self.build({
+            "index.html": PLAIN_HTML,
+            "game.js": 'new Audio("https://cdn.example.com/theme.mp3").play();\n',
+        })
+        self.assertRuleFails(results, ORIGINS_RULE)
+
+    def test_injected_script_src_fails(self):
+        results = self.build({
+            "index.html": PLAIN_HTML,
+            "game.js": (
+                'const s = document.createElement("script");\n'
+                's.src = "https://analytics.example.com/a.js";\n'
+                "document.head.appendChild(s);\n"
+            ),
+        })
+        self.assertRuleFails(results, ORIGINS_RULE)
+
+    def test_protocol_relative_escaped_and_template_forms_fail(self):
+        for js in (
+            'const u = "//cdn.example.com/x.js";\nnew Image().src = u;\n',
+            'const u = "https:\\/\\/cdn.example.com/x.js";\nnew Image().src = u;\n',
+            "const u = `https://cdn.example.com/x.js`;\nnew Image().src = u;\n",
+        ):
+            with self.subTest(js=js):
+                results = self.build({"index.html": PLAIN_HTML, "game.js": js})
+                self.assertRuleFails(results, ORIGINS_RULE)
+
+    def test_srcset_and_poster_attributes_fail(self):
+        for tag in (
+            '<img srcset="https://cdn.example.com/a.png 2x" alt="a">',
+            '<video poster="https://cdn.example.com/p.jpg"></video>',
+        ):
+            with self.subTest(tag=tag):
+                results = self.build({
+                    "index.html": (
+                        f"<!doctype html><html><body>{tag}"
+                        '<script src="game.js"></script></body></html>\n'
+                    ),
+                    "game.js": "var a=1;\n",
+                })
+                self.assertRuleFails(results, ORIGINS_RULE)
+
+    def test_inline_style_block_with_a_remote_font_fails(self):
+        results = self.build({
+            "index.html": (
+                "<!doctype html><html><head><style>\n"
+                '@font-face{font-family:x;src:url("https://fonts.example.com/x.woff2")}\n'
+                '</style></head><body><script src="game.js"></script></body></html>\n'
+            ),
+            "game.js": "var a=1;\n",
+        })
+        self.assertRuleFails(results, ORIGINS_RULE)
+
+    # --- what the new rule must NOT catch ------------------------------
+
+    def test_url_in_a_data_block_still_passes(self):
+        # The regression guard: a quoted absolute URL is ordinary data in a
+        # <script> the browser never runs, and our own pages ship one.
+        for type_value in ("application/ld+json", "text/template", "application/json"):
+            with self.subTest(type=type_value):
+                results = self.build({
+                    "index.html": (
+                        "<!doctype html><html><head>"
+                        f'<script type="{type_value}">'
+                        '{"@context":"https://schema.org","name":"t"}'
+                        "</script></head><body>"
+                        '<script src="game.js"></script></body></html>\n'
+                    ),
+                    "game.js": "const a=1;\n",
+                })
+                self.assertAllPass(results)
+
+    def test_url_in_a_comment_still_passes(self):
+        results = self.build({
+            "index.html": PLAIN_HTML,
+            "game.js": (
+                "// Fully offline: nothing is fetched.\n"
+                "/* Not even https://example.com/ is contacted. */\nconst c=1;\n"
+            ),
+        })
+        self.assertAllPass(results)
+
+    def test_bare_double_slash_string_still_passes(self):
+        # "//" with no host after it is a separator, not an origin.
+        results = self.build({
+            "index.html": PLAIN_HTML,
+            "game.js": 'const sep = "//";\nconst path = ["a", "b"].join(sep);\n',
+        })
+        self.assertAllPass(results)
+
+    def test_relative_paths_still_pass(self):
+        results = self.build({
+            "index.html": PLAIN_HTML,
+            "game.js": (
+                'const sprites = "./assets/sprites.png";\n'
+                'new Image().src = sprites;\n'
+            ),
+        })
+        self.assertAllPass(results)
+
+
 class UnchangedRules(SubmissionCase):
     """Rules the fix must not have moved."""
 

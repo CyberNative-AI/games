@@ -22,10 +22,27 @@ EXTERNAL_ORIGIN_PATTERNS = [
     re.compile(r"\bXMLHttpRequest\b", re.IGNORECASE),
     re.compile(r"\bWebSocket\s*\(", re.IGNORECASE),
     re.compile(r"\bEventSource\s*\(", re.IGNORECASE),
-    re.compile(r"""(?:src|href)\s*=\s*["']\s*(?:https?:)?//""", re.IGNORECASE),
+    re.compile(
+        r"""(?:src|srcset|href|poster)\s*=\s*["']\s*(?:https?:)?//""",
+        re.IGNORECASE,
+    ),
     re.compile(r"""url\(\s*["']?\s*(?:https?:)?//""", re.IGNORECASE),
     re.compile(r"@import\s+(?:url\()?\s*['\"]?\s*(?:https?:)?//", re.IGNORECASE),
 ]
+
+# An absolute URL written as a string literal. The patterns above match the
+# *syntax* of a load, so they only see a URL that sits directly after `src=`
+# or inside `url(`; `new Audio("https://…")`, `import(CDN)` and
+# `img.src = u` all route the same load through a plain string and slip past.
+# This pattern matches the URL itself, so it catches every one of them —
+# which is why it is scanned only against code a browser executes. In a data
+# block a quoted absolute URL is ordinary data, not a load: our own pages
+# ship `{"@context":"https://schema.org"}` in a JSON-LD script.
+# `(?:\\?/){2}` also accepts the `https:\/\/` form legal in a JS string, and
+# the trailing class requires a host character so `"//"` alone is not a URL.
+ABSOLUTE_URL_LITERAL = re.compile(
+    r"""["'`]\s*(?:https?:)?(?:\\?/){2}[^\s"'`]""", re.IGNORECASE
+)
 
 EVENT_HANDLER_ATTR = re.compile(r"""\son[a-z]+\s*=\s*["']""", re.IGNORECASE)
 
@@ -222,19 +239,27 @@ def strip_css_comments(text):
 class _HtmlScan(HTMLParser):
     """Collect the parts of an HTML file the origin/inline rules apply to.
 
-    `tags` holds the raw source of every start tag, `scripts` holds one entry
-    per <script> element, and `embedded` holds <script>/<style> bodies with
-    their comments stripped. Comments and text nodes are deliberately left
-    out: neither can reference an origin or execute.
+    `tags` holds the raw source of every start tag and `scripts` holds one
+    entry per <script> element. Element bodies arrive with their comments
+    stripped and split by whether the browser runs them: `embedded_code` for
+    <style> and executable <script> bodies, `embedded_data` for the bodies of
+    data blocks such as <script type="application/ld+json">. Comments and
+    text nodes are deliberately left out: neither can reference an origin or
+    execute.
     """
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.tags = []
         self.scripts = []
-        self.embedded = []
+        self.embedded_code = []
+        self.embedded_data = []
         self._open_script = None
         self._in_style = False
+
+    @property
+    def embedded(self):
+        return self.embedded_code + self.embedded_data
 
     def handle_starttag(self, tag, attrs):
         source = self.get_starttag_text() or ""
@@ -263,9 +288,13 @@ class _HtmlScan(HTMLParser):
     def handle_data(self, data):
         if self._open_script is not None:
             self._open_script["content"] += data
-            self.embedded.append(strip_js_comments(data, html_comments=True))
+            stripped = strip_js_comments(data, html_comments=True)
+            if script_is_executable(self._open_script["attrs"]):
+                self.embedded_code.append(stripped)
+            else:
+                self.embedded_data.append(stripped)
         elif self._in_style:
-            self.embedded.append(strip_css_comments(data))
+            self.embedded_code.append(strip_css_comments(data))
 
 
 def scan_html(text):
@@ -298,18 +327,26 @@ def script_is_executable(attrs):
 
 
 def scannable_code(path, text):
-    """The text of `path` that the external-origin rules apply to."""
+    """The text of `path` the external-origin rules apply to, in two parts.
+
+    The first part is what a browser executes — a .js/.mjs or .css file, and
+    the <style> and executable <script> bodies of an HTML file. The second is
+    everything else the rules still read: start tags, and the bodies of data
+    blocks. Only the executable part is scanned for absolute-URL literals.
+    """
     ext = os.path.splitext(path)[1].lower()
     if ext in JS_EXTS:
-        return strip_js_comments(text)
+        return strip_js_comments(text), ""
     if ext in CSS_EXTS:
-        return strip_css_comments(text)
+        return strip_css_comments(text), ""
     if ext in HTML_EXTS:
         scan, ok = scan_html(text)
         if not ok:
-            return text  # unparseable: fall back to the whole file
-        return "\n".join(scan.tags + scan.embedded)
-    return text
+            # Unparseable: scan the whole file, but only for load syntax. It
+            # already fails the inline-script rule, so nothing is let through.
+            return "", text
+        return "\n".join(scan.embedded_code), "\n".join(scan.tags + scan.embedded_data)
+    return "", text
 
 
 def _git_changed_paths(base_ref):
@@ -425,11 +462,13 @@ def check_external_origins(sub_dir):
         text = read_text(path)
         if text is None:
             continue
-        code = scannable_code(path, text)
-        for pattern in EXTERNAL_ORIGIN_PATTERNS:
-            if pattern.search(code):
-                offenders.append(os.path.relpath(path, sub_dir))
-                break
+        executable, other = scannable_code(path, text)
+        hit = any(
+            pattern.search(executable) or pattern.search(other)
+            for pattern in EXTERNAL_ORIGIN_PATTERNS
+        ) or ABSOLUTE_URL_LITERAL.search(executable)
+        if hit:
+            offenders.append(os.path.relpath(path, sub_dir))
     if offenders:
         return False, "External origin or network API reference found in: " + ", ".join(sorted(offenders))
     return True, "No external origins or network APIs found in shipped files."
