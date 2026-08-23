@@ -38,10 +38,12 @@ EXTERNAL_ORIGIN_PATTERNS = [
 # which is why it is scanned only against code a browser executes. In a data
 # block a quoted absolute URL is ordinary data, not a load: our own pages
 # ship `{"@context":"https://schema.org"}` in a JSON-LD script.
-# `(?:\\?/){2}` also accepts the `https:\/\/` form legal in a JS string, and
-# the trailing class requires a host character so `"//"` alone is not a URL.
+# `(?:\\?/){2}` also accepts the `https:\/\/` form legal in a JS string. A
+# literal carrying the scheme is a URL however it ends, including the
+# `"https://" + host` prefix form; a protocol-relative one needs a host
+# character after the slashes, so `"//"` on its own stays a separator.
 ABSOLUTE_URL_LITERAL = re.compile(
-    r"""["'`]\s*(?:https?:)?(?:\\?/){2}[^\s"'`]""", re.IGNORECASE
+    r"""["'`]\s*(?:https?:(?:\\?/){2}|(?:\\?/){2}[^\s"'`])""", re.IGNORECASE
 )
 
 EVENT_HANDLER_ATTR = re.compile(r"""\son[a-z]+\s*=\s*["']""", re.IGNORECASE)
