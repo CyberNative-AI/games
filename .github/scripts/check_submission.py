@@ -8,10 +8,14 @@ import os
 import re
 import subprocess
 import sys
+from html.parser import HTMLParser
 
 MAX_BYTES = 20 * 1024 * 1024  # 20 MiB
 REQUIRED_MANIFEST_FIELDS = ["name", "slug", "version", "entry", "creator", "license"]
 CODE_EXTS = {".html", ".htm", ".js", ".mjs", ".css"}
+HTML_EXTS = {".html", ".htm"}
+JS_EXTS = {".js", ".mjs"}
+CSS_EXTS = {".css"}
 
 EXTERNAL_ORIGIN_PATTERNS = [
     re.compile(r"\bfetch\s*\(", re.IGNORECASE),
@@ -23,8 +27,289 @@ EXTERNAL_ORIGIN_PATTERNS = [
     re.compile(r"@import\s+(?:url\()?\s*['\"]?\s*(?:https?:)?//", re.IGNORECASE),
 ]
 
-INLINE_SCRIPT_TAG = re.compile(r"<script(?![^>]*\bsrc\s*=)[^>]*>\s*[^<\s]", re.IGNORECASE)
 EVENT_HANDLER_ATTR = re.compile(r"""\son[a-z]+\s*=\s*["']""", re.IGNORECASE)
+
+# HTML's "JavaScript MIME type essence match" list, plus the three inline
+# script kinds a `script-src 'self'` policy still blocks. A <script> whose
+# type is outside this set is a data block: the browser never executes it and
+# production CSP allows it — e.g. <script type="application/ld+json">.
+EXECUTABLE_SCRIPT_TYPES = {
+    "application/ecmascript",
+    "application/javascript",
+    "application/x-ecmascript",
+    "application/x-javascript",
+    "text/ecmascript",
+    "text/javascript",
+    "text/javascript1.0",
+    "text/javascript1.1",
+    "text/javascript1.2",
+    "text/javascript1.3",
+    "text/javascript1.4",
+    "text/javascript1.5",
+    "text/jscript",
+    "text/livescript",
+    "text/x-ecmascript",
+    "text/x-javascript",
+    "module",
+    "importmap",
+    "speculationrules",
+}
+
+_WORD_CHARS = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$"
+)
+# After one of these a `/` starts a regular expression, not a division.
+_KEYWORDS_BEFORE_REGEX = {
+    "await", "case", "delete", "do", "else", "in", "instanceof", "new", "of",
+    "return", "throw", "typeof", "void", "yield",
+}
+
+
+# --- comment stripping -------------------------------------------------
+#
+# The origin rules describe what a game *does*, so they are scanned against
+# code with comments removed: a submission that says "no fetch() here" in a
+# comment is complying with the rule, not breaking it. String literals are
+# still scanned — a real reference can hide in one, a comment cannot run.
+#
+# The strippers are string- and regex-literal-aware so that a quote or a
+# `/*` inside a literal can never make live code look commented out. When
+# they cannot tell, they keep the text: keeping text can only cost a false
+# positive, dropping it would cost a false negative.
+
+
+def _skip_string(text, index):
+    """Return the index just past the string literal starting at `index`."""
+    quote = text[index]
+    i = index + 1
+    n = len(text)
+    while i < n:
+        char = text[i]
+        if char == "\\":
+            i += 2
+            continue
+        if char == quote:
+            return i + 1
+        if char == "\n" and quote != "`":
+            return i  # unterminated: stop at the line break
+        i += 1
+    return n
+
+
+def _skip_regex_literal(text, index):
+    """Return the index just past the regex literal at `index`, or None."""
+    i = index + 1
+    n = len(text)
+    in_class = False
+    while i < n:
+        char = text[i]
+        if char == "\\":
+            i += 2
+            continue
+        if char == "\n":
+            return None  # regex literals cannot span lines
+        if in_class:
+            if char == "]":
+                in_class = False
+        elif char == "[":
+            in_class = True
+        elif char == "/":
+            i += 1
+            while i < n and text[i].isalpha():
+                i += 1  # flags
+            return i
+        i += 1
+    return None
+
+
+def _regex_can_start(prev_char, prev_word):
+    if prev_char is None:
+        return True
+    if prev_char in _WORD_CHARS:
+        return prev_word in _KEYWORDS_BEFORE_REGEX
+    return prev_char not in (")", "]")
+
+
+def strip_js_comments(text, html_comments=False):
+    """Remove JavaScript comments, leaving string and regex literals intact.
+
+    `html_comments` also treats the legacy `<!--` / `-->` forms as comments,
+    which is what a browser does inside an HTML <script> element.
+    """
+    out = []
+    i = 0
+    n = len(text)
+    prev_char = None
+    prev_word = ""
+    at_line_start = True
+
+    def line_end(start):
+        stop = text.find("\n", start)
+        return n if stop == -1 else stop
+
+    while i < n:
+        char = text[i]
+
+        if html_comments and text.startswith("<!--", i):
+            i = line_end(i)
+            continue
+        if html_comments and at_line_start and text.startswith("-->", i):
+            i = line_end(i)
+            continue
+
+        if char == "/" and i + 1 < n:
+            nxt = text[i + 1]
+            if nxt == "/":
+                i = line_end(i)
+                continue
+            if nxt == "*":
+                stop = text.find("*/", i + 2)
+                i = n if stop == -1 else stop + 2
+                out.append(" ")
+                continue
+            if _regex_can_start(prev_char, prev_word):
+                stop = _skip_regex_literal(text, i)
+                if stop is not None:
+                    out.append(text[i:stop])
+                    prev_char, prev_word, at_line_start = "/", "", False
+                    i = stop
+                    continue
+
+        if char in "\"'`":
+            stop = _skip_string(text, i)
+            out.append(text[i:stop])
+            prev_char, prev_word, at_line_start = char, "", False
+            i = stop
+            continue
+
+        out.append(char)
+        if char == "\n":
+            at_line_start = True
+        elif not char.isspace():
+            at_line_start = False
+            prev_char = char
+            prev_word = prev_word + char if char in _WORD_CHARS else ""
+        i += 1
+
+    return "".join(out)
+
+
+def strip_css_comments(text):
+    """Remove CSS block comments, leaving string literals intact."""
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        char = text[i]
+        if char == "/" and text.startswith("/*", i):
+            stop = text.find("*/", i + 2)
+            i = n if stop == -1 else stop + 2
+            out.append(" ")
+            continue
+        if char in "\"'":
+            stop = _skip_string(text, i)
+            out.append(text[i:stop])
+            i = stop
+            continue
+        out.append(char)
+        i += 1
+    return "".join(out)
+
+
+# --- HTML scanning -----------------------------------------------------
+
+
+class _HtmlScan(HTMLParser):
+    """Collect the parts of an HTML file the origin/inline rules apply to.
+
+    `tags` holds the raw source of every start tag, `scripts` holds one entry
+    per <script> element, and `embedded` holds <script>/<style> bodies with
+    their comments stripped. Comments and text nodes are deliberately left
+    out: neither can reference an origin or execute.
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tags = []
+        self.scripts = []
+        self.embedded = []
+        self._open_script = None
+        self._in_style = False
+
+    def handle_starttag(self, tag, attrs):
+        source = self.get_starttag_text() or ""
+        self.tags.append(source)
+        if tag == "script":
+            self._open_script = {"attrs": attrs, "content": ""}
+            self.scripts.append(self._open_script)
+        elif tag == "style":
+            self._in_style = True
+
+    def handle_startendtag(self, tag, attrs):
+        # A browser treats `<script/>` as an open tag whose content runs, so
+        # mirror that instead of letting a stray slash hide inline code.
+        self.handle_starttag(tag, attrs)
+        if tag in self.CDATA_CONTENT_ELEMENTS:
+            self.set_cdata_mode(tag)
+        else:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        if tag == "script":
+            self._open_script = None
+        elif tag == "style":
+            self._in_style = False
+
+    def handle_data(self, data):
+        if self._open_script is not None:
+            self._open_script["content"] += data
+            self.embedded.append(strip_js_comments(data, html_comments=True))
+        elif self._in_style:
+            self.embedded.append(strip_css_comments(data))
+
+
+def scan_html(text):
+    """Parse `text`, or return a scan flagged as failed if it cannot be."""
+    scan = _HtmlScan()
+    try:
+        scan.feed(text)
+        scan.close()
+    except Exception:
+        return scan, False
+    return scan, True
+
+
+def script_has_src(attrs):
+    return any(name == "src" for name, _value in attrs)
+
+
+def script_is_executable(attrs):
+    """True if a browser would run this <script>, or CSP would block it."""
+    type_value = None
+    for name, value in attrs:
+        if name == "type":
+            type_value = value or ""
+    if type_value is None:
+        return True  # no type attribute: classic JavaScript
+    essence = type_value.split(";")[0].strip().lower()
+    if not essence:
+        return True  # type="" is also classic JavaScript
+    return essence in EXECUTABLE_SCRIPT_TYPES
+
+
+def scannable_code(path, text):
+    """The text of `path` that the external-origin rules apply to."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in JS_EXTS:
+        return strip_js_comments(text)
+    if ext in CSS_EXTS:
+        return strip_css_comments(text)
+    if ext in HTML_EXTS:
+        scan, ok = scan_html(text)
+        if not ok:
+            return text  # unparseable: fall back to the whole file
+        return "\n".join(scan.tags + scan.embedded)
+    return text
 
 
 def _git_changed_paths(base_ref):
@@ -125,16 +410,24 @@ def iter_code_files(sub_dir):
                 yield os.path.join(root, name)
 
 
+def read_text(path):
+    """File contents, or None if it cannot be read."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
 def check_external_origins(sub_dir):
     offenders = []
     for path in iter_code_files(sub_dir):
-        try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                text = f.read()
-        except OSError:
+        text = read_text(path)
+        if text is None:
             continue
+        code = scannable_code(path, text)
         for pattern in EXTERNAL_ORIGIN_PATTERNS:
-            if pattern.search(text):
+            if pattern.search(code):
                 offenders.append(os.path.relpath(path, sub_dir))
                 break
     if offenders:
@@ -145,14 +438,30 @@ def check_external_origins(sub_dir):
 def check_inline_scripts(sub_dir):
     offenders = []
     for path in iter_code_files(sub_dir):
-        if os.path.splitext(path)[1].lower() not in (".html", ".htm"):
+        if os.path.splitext(path)[1].lower() not in HTML_EXTS:
             continue
-        try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                text = f.read()
-        except OSError:
+        text = read_text(path)
+        if text is None:
             continue
-        has_inline = bool(INLINE_SCRIPT_TAG.search(text)) or bool(EVENT_HANDLER_ATTR.search(text))
+        scan, parsed = scan_html(text)
+        if not parsed:
+            offenders.append(os.path.relpath(path, sub_dir))
+            continue
+        # A <script> is inline only if it has no src and the browser would
+        # execute it. Content that is only whitespace is a no-op the CSP
+        # never sees; anything else — including a legacy <!-- --> wrapper,
+        # whose body still runs — is inline JavaScript.
+        has_inline = any(
+            not script_has_src(script["attrs"])
+            and script_is_executable(script["attrs"])
+            and script["content"].strip()
+            for script in scan.scripts
+        )
+        if not has_inline:
+            has_inline = any(
+                EVENT_HANDLER_ATTR.search(chunk)
+                for chunk in scan.tags + scan.embedded
+            )
         if has_inline:
             offenders.append(os.path.relpath(path, sub_dir))
     if offenders:
