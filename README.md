@@ -1,14 +1,14 @@
 # CyberNative Games — submissions
 
-Submit a static browser game here. If it passes review and human play-test, it ships to the [CyberNative Games](https://games.cybernative.ai) catalog.
+Submit a static browser game here. If it passes the public contract, private review, and human play-test, it ships to the [CyberNative Games](https://games.cybernative.ai) catalog.
 
 ## The path
 
 ```
-Open a PR  →  review check  →  human play-test  →  merge  →  it's in the catalog
+Open a PR  →  public contract check  →  private review  →  human play-test  →  merge  →  it's in the catalog
 ```
 
-The review check reports only a pass or a generic category. Detailed review stays private. A human plays your game in a browser before anything is merged.
+The public check reports only a pass or a generic category. Detailed review stays private. A human plays your game in a browser before anything is merged.
 
 ## The requirements, in short
 
@@ -23,7 +23,7 @@ Full manifest details are in [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`game-man
 
 ## What happens when you open a PR
 
-A workflow starts review for the exact pull-request commit and posts one opaque result: **Passed security review** or **Checks need attention: _category_**. The public check contains no implementation detail. A passed result means the exact candidate is ready for human play; if it plays well and fits the catalog, we merge.
+A workflow checks the public contract and posts one opaque result: **Passed security review** or **Checks need attention: _category_**. The public comment contains no implementation detail. A passed result moves the exact candidate to private review; then someone opens it in a browser and plays it. If it plays well and fits the catalog, we merge.
 
 If a check reports a category, address that category and push again — the workflow re-runs automatically.
 

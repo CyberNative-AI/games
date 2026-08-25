@@ -58,12 +58,12 @@ Keep the package within the public size limit and include media in the submissio
 
 Submit an original game that fits the catalog and its audience.
 
-## 4. Review check
+## 4. Public check and private review
 
-The review check does not execute, build, bundle, transpile, or import your submission in this repository. It posts one opaque conclusion: **Passed security review** or **Checks need attention: _category_**. Detailed review is private, and public comments contain no implementation detail.
+The public check does not execute, build, bundle, transpile, or import your submission. It posts one opaque conclusion: **Passed security review** or **Checks need attention: _category_**. Detailed review is private, and public comments contain no implementation detail.
 
 ## 5. After checks pass
 
-Someone opens your game in a browser and plays it. If it works, fits the catalog, and clears review, we merge your PR and it ships to [games.cybernative.ai](https://games.cybernative.ai).
+Someone opens your game in a browser and plays it. If it works, fits the catalog, and clears private review, we merge your PR and it ships to [games.cybernative.ai](https://games.cybernative.ai).
 
 If checks report a category, address that category and push again — the workflow re-runs on every push.
