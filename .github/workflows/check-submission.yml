@@ -2,9 +2,10 @@ name: Queue private submission review
 
 on:
   pull_request_target:
-    branches: [main]
+    types: [opened, synchronize, reopened]
     paths:
-      - "submissions/**"
+      - 'submissions/**'
+      - '.github/workflows/check-submission.yml'
 
 permissions:
   contents: read
@@ -12,27 +13,31 @@ permissions:
 jobs:
   dispatch:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      # Do not check out or execute the pull-request tree here. The dispatch
-      # payload binds the private worker to this exact immutable commit.
-      - name: Start private intake for this exact commit
+      - name: Queue the immutable public revision
         uses: actions/github-script@v7
         env:
-          INTAKE_REPOSITORY: ${{ secrets.CYBERNATIVE_INTAKE_REPOSITORY }}
+          # Repository Actions configuration holds the private endpoint; this
+          # public tree must not disclose the private custody location.
+          INTAKE_DISPATCH_ENDPOINT: ${{ vars.GAMES_INTAKE_DISPATCH_ENDPOINT }}
         with:
-          github-token: ${{ secrets.CYBERNATIVE_INTAKE_DISPATCH_TOKEN }}
+          github-token: ${{ secrets.GAMES_INTAKE_DISPATCH_TOKEN }}
           script: |
-            const [owner, repo] = (process.env.INTAKE_REPOSITORY || '').split('/');
-            if (!owner || !repo) throw new Error('private review dispatch is not configured');
-            await github.rest.repos.createDispatchEvent({
-              owner,
-              repo,
+            const pullRequest = context.payload.pull_request;
+            const baseRepo = context.payload.repository?.full_name;
+            const headRepo = pullRequest?.head?.repo?.full_name;
+            const headSha = pullRequest?.head?.sha;
+            const endpoint = process.env.INTAKE_DISPATCH_ENDPOINT;
+            if (baseRepo !== 'CyberNative-AI/games'
+                || !/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(headRepo || '')
+                || !/^[a-f0-9]{40}$/.test(headSha || '')
+                || !/^https:\/\/api\.github\.com\/repos\/[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*\/dispatches$/.test(endpoint || '')) {
+              core.setFailed('submission revision is unavailable or malformed');
+              return;
+            }
+            await github.request('POST {endpoint}', {
+              endpoint,
               event_type: 'submission-review-request',
-              client_payload: {
-                base_repo: context.repo.owner + '/' + context.repo.repo,
-                base_sha: context.payload.pull_request.base.sha,
-                head_repo: context.payload.pull_request.head.repo.full_name,
-                head_sha: context.payload.pull_request.head.sha,
-                pr_number: context.payload.pull_request.number,
-              },
+              client_payload: { base_repo: baseRepo, head_repo: headRepo, head_sha: headSha },
             });
