@@ -1,0 +1,9 @@
+{
+  "name": "SIROCCO",
+  "slug": "sirocco",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "creator": "AndriiAndrus",
+  "license": "MIT",
+  "description": "SIROCCO — a single-file WebGL tactical AI sandbox: defuse or defend on a sun-baked desert map against bot teams, with real ballistics, recoil spray, buy economy and round flow. Zero dependencies; one HTML file."
+}
