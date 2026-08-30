@@ -36,8 +36,7 @@ jobs:
               core.setFailed('submission revision is unavailable or malformed');
               return;
             }
-            await github.request('POST {endpoint}', {
-              endpoint,
+            await github.request(`POST ${endpoint}`, {
               event_type: 'submission-review-request',
               client_payload: { base_repo: baseRepo, head_repo: headRepo, head_sha: headSha },
             });
