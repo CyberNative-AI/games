@@ -26,10 +26,12 @@ jobs:
           script: |
             const pullRequest = context.payload.pull_request;
             const baseRepo = context.payload.repository?.full_name;
+            const baseSha = pullRequest?.base?.sha;
             const headRepo = pullRequest?.head?.repo?.full_name;
             const headSha = pullRequest?.head?.sha;
             const endpoint = process.env.INTAKE_DISPATCH_ENDPOINT;
             if (baseRepo !== 'CyberNative-AI/games'
+                || !/^[a-f0-9]{40}$/.test(baseSha || '')
                 || !/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(headRepo || '')
                 || !/^[a-f0-9]{40}$/.test(headSha || '')
                 || !/^https:\/\/api\.github\.com\/repos\/[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*\/dispatches$/.test(endpoint || '')) {
@@ -38,5 +40,5 @@ jobs:
             }
             await github.request(`POST ${endpoint}`, {
               event_type: 'submission-review-request',
-              client_payload: { base_repo: baseRepo, head_repo: headRepo, head_sha: headSha },
+              client_payload: { base_repo: baseRepo, base_sha: baseSha, head_repo: headRepo, head_sha: headSha },
             });
