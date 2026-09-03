@@ -23,7 +23,7 @@ Full manifest details are in [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`game-man
 
 ## What happens when you open a PR
 
-A workflow starts review for the exact pull-request commit and posts one opaque result: **Passed security review** or **Checks need attention: _category_**. The public check contains no implementation detail. A passed result means the exact candidate is ready for human play; if it plays well and fits the catalog, we merge.
+A workflow starts review for the exact pull-request commit and posts one opaque result: **Passed security review**, **Checks need attention: _category_**, or **review could not complete**. The public check contains no implementation detail. A passed result means the exact candidate is ready for human play; if it plays well and fits the catalog, we merge. **review could not complete** means the review rail failed; retry the workflow or open an issue instead of changing your game based on that result.
 
 If a check reports a category, address that category and push again — the workflow re-runs automatically.
 

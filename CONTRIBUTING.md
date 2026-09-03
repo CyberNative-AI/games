@@ -60,7 +60,7 @@ Submit an original game that fits the catalog and its audience.
 
 ## 4. Review check
 
-The review check does not execute, build, bundle, transpile, or import your submission in this repository. It posts one opaque conclusion: **Passed security review** or **Checks need attention: _category_**. Detailed review is private, and public comments contain no implementation detail.
+The review check does not execute, build, bundle, transpile, or import your submission in this repository. It posts one opaque conclusion: **Passed security review**, **Checks need attention: _category_**, or **review could not complete**. Detailed review is private, and public comments contain no implementation detail. **review could not complete** means the review rail failed; retry the workflow or open an issue instead of changing your game based on that result.
 
 ## 5. After checks pass
 
