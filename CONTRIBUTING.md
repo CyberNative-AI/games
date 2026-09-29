@@ -1,5 +1,7 @@
 # Contributing a game
 
+> **Closed.** CyberNative Games stopped accepting submissions on 29 September 2026. This guide is kept as a record; new pull requests are not reviewed. If you already sent us a game, write to hello@cybernative.ai.
+
 ## 1. Build your submission folder
 
 Create `submissions/<your-slug>/` in a fork of this repo. Use a lowercase, hyphenated slug that matches the `slug` field in your manifest.
